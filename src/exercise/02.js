@@ -28,20 +28,63 @@ function asyncReducer(state, action) {
   }
 }
 
-function useAsync(asyncCallback, initialState, dependencies) {
-  const [state, dispatch] = React.useReducer(asyncReducer, {
+// function useAsync(asyncCallback, initialState) {
+//   const [state, dispatch] = React.useReducer(asyncReducer, {
+//     status: 'idle',
+//     data: null,
+//     error: null,
+//     ...initialState
+//   });
+
+//   React.useEffect(() => {
+//     const promise = asyncCallback();
+//     if (!promise) {
+//       return;
+//     }
+
+//     dispatch({type: 'pending'})
+//     promise.then(
+//       data => {
+//         dispatch({type: 'resolved', data});
+//       },
+//       error => {
+//         dispatch({type: 'rejected', error});
+//       },
+//     );
+//   // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [asyncCallback]);
+
+//   return state;
+// }
+
+function useSafeDispatch(unsafeDispatch) {
+  const mountedRef = React.useRef(false);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const dispatch = React.useCallback((...args) => {
+    if (mountedRef.current)
+      unsafeDispatch(...args);
+  }, [unsafeDispatch]);
+
+  return dispatch;
+}
+
+function useAsync(initialState) {
+  const [state, unsafeDispatch] = React.useReducer(asyncReducer, {
     status: 'idle',
     data: null,
     error: null,
     ...initialState
   });
 
-  React.useEffect(() => {
-    const promise = asyncCallback();
-    if (!promise) {
-      return;
-    }
+  const dispatch = useSafeDispatch(unsafeDispatch);
 
+  const run = React.useCallback(promise => {
     dispatch({type: 'pending'})
     promise.then(
       data => {
@@ -50,30 +93,47 @@ function useAsync(asyncCallback, initialState, dependencies) {
       error => {
         dispatch({type: 'rejected', error});
       },
-    )
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, dependencies);
+    );
+  }, [dispatch]);
 
-  return state;
+  return {...state, run};
+}
+
+// eslint-disable-next-line no-unused-vars
+function UseCallback(dependencies, action) {
+  const callback = React.useCallback(() => {
+    if (!dependencies) {
+      return
+    }
+
+    return getOrAddPromises(dependencies, action);
+  }, [dependencies, action]);
+
+  return callback;
+}
+
+// Extra Credit: 3 Utilised cached promises using Memoization
+const promises = {};
+function getOrAddPromises(key, action) {
+  if (!promises[key])
+    promises[key] = action(key);
+
+  return promises[key];
 }
 
 function PokemonInfo({pokemonName}) {
-  // 🐨 move all the code between the lines into a new useAsync function.
-  // 💰 look below to see how the useAsync hook is supposed to be called
-  // 💰 If you want some help, here's the function signature (or delete this
-  // comment really quick if you don't want the spoiler)!
-  // 
-
   // 🐨 here's how you'll use the new useAsync hook you're writing:
-  const state = useAsync(() => {
-    if (!pokemonName) {
-      return
-    }
-    return fetchPokemon(pokemonName)
-  }, { status: pokemonName ? 'idle' : 'pending', data: null, error: null }, [pokemonName]);
+  const state = useAsync({ status: pokemonName ? 'idle' : 'pending', data: null, error: null });
 
   // 🐨 this will change from "pokemon" to "data"
-  const {data: pokemon, status, error} = state;
+  const {data: pokemon, status, error, run} = state;
+
+  React.useEffect(() => {
+    if (!pokemonName)
+      return;
+
+    run(fetchPokemon(pokemonName));
+  }, [pokemonName, run]);
 
   switch (status) {
     case 'idle':
